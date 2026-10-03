@@ -8,27 +8,35 @@ from typing import Any
 
 from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).resolve().parents[3] / ".env")
-
-PROMPTS_DIR = Path(__file__).resolve().parents[1] / "prompts"
 ROOT = Path(__file__).resolve().parents[3]
+PROMPTS_DIR = Path(__file__).resolve().parents[1] / "prompts"
+
+load_dotenv(ROOT / ".env")
 
 try:
+    import anthropic
     from anthropic import Anthropic
 except ImportError:  # pragma: no cover
+    anthropic = None  # type: ignore[assignment]
     Anthropic = None  # type: ignore[misc, assignment]
+
+MAX_ANSWER_CHARS = 4000
 
 
 class InterviewAIError(RuntimeError):
-    pass
+    """Something went wrong talking to Claude. The message is safe to show the user."""
+
+
+class InterviewConfigError(InterviewAIError):
+    """Setup problem (missing or rejected API key). Retrying or using the fallback bank won't help."""
 
 
 def _client() -> Anthropic:
     if Anthropic is None:
-        raise InterviewAIError("Install dependencies: pip install -r backend/requirements.txt")
+        raise InterviewConfigError("Install dependencies: pip install -r backend/requirements.txt")
     api_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
     if not api_key or api_key == "your_api_key_here":
-        raise InterviewAIError(
+        raise InterviewConfigError(
             "Missing ANTHROPIC_API_KEY. Copy .env.example to .env and paste your key."
         )
     return Anthropic(api_key=api_key)
@@ -37,7 +45,7 @@ def _client() -> Anthropic:
 def _model(kind: str) -> str:
     if kind == "fast":
         return os.getenv("CLAUDE_FAST_MODEL", "claude-haiku-4-5")
-    return os.getenv("CLAUDE_SCORING_MODEL", "claude-sonnet-4-5")
+    return os.getenv("CLAUDE_SCORING_MODEL", "claude-sonnet-5-5")
 
 
 def _read_prompt(name: str) -> str:
@@ -61,10 +69,23 @@ def _extract_json(text: str) -> dict[str, Any]:
     return json.loads(text[start : end + 1])
 
 
+def _to_score(value: Any, default: int = 0) -> int:
+    """Turn whatever Claude returned (7, 7.4, "7", "7/10") into an int from 0 to 10."""
+    try:
+        if isinstance(value, str):
+            match = re.search(r"\d+(?:\.\d+)?", value)
+            if not match:
+                return default
+            value = float(match.group())
+        return max(0, min(10, round(float(value))))
+    except (TypeError, ValueError):
+        return default
+
+
 def _complete(system: str, user: str, *, kind: str = "scoring") -> dict[str, Any]:
     client = _client()
     last_error: Exception | None = None
-    for _ in range(2):
+    for _ in range(2):  # one retry, only for unreadable JSON
         try:
             message = client.messages.create(
                 model=_model(kind),
@@ -72,11 +93,24 @@ def _complete(system: str, user: str, *, kind: str = "scoring") -> dict[str, Any
                 system=system,
                 messages=[{"role": "user", "content": user}],
             )
-            text = "".join(block.text for block in message.content if getattr(block, "type", "") == "text")
+        except anthropic.AuthenticationError as exc:
+            raise InterviewConfigError(
+                "Claude rejected your API key. Check ANTHROPIC_API_KEY in .env."
+            ) from exc
+        except anthropic.RateLimitError as exc:
+            raise InterviewAIError("Rate limit reached. Wait a minute and try again.") from exc
+        except anthropic.APIConnectionError as exc:
+            raise InterviewAIError("Could not reach the Claude API. Check your internet.") from exc
+        except anthropic.APIStatusError as exc:
+            # Includes "credit balance too low" and "model not found".
+            raise InterviewAIError(f"Claude API error ({exc.status_code}): {exc.message}") from exc
+
+        text = "".join(block.text for block in message.content if getattr(block, "type", "") == "text")
+        try:
             return _extract_json(text)
         except (json.JSONDecodeError, InterviewAIError) as exc:
             last_error = exc
-    raise InterviewAIError(f"Could not parse Claude JSON after retry: {last_error}")
+    raise InterviewAIError(f"Could not read Claude's JSON after a retry: {last_error}")
 
 
 def generate_question(
@@ -87,7 +121,11 @@ def generate_question(
     resume_text: str = "",
     job_description: str = "",
 ) -> dict[str, Any]:
-    """Ask Claude for the next interview question. Falls back to the local bank if the API fails."""
+    """Ask Claude for the next interview question.
+
+    Falls back to the local bank if Claude is temporarily unavailable or returns junk.
+    Setup problems (missing or bad API key) are raised, not hidden.
+    """
     history = history or []
     asked = [item.get("question", "") for item in history]
     system = _read_prompt("generate_question.txt").format(role=role, level=level)
@@ -110,6 +148,8 @@ def generate_question(
             "topic": str(data.get("topic") or topic or "sql"),
             "difficulty": str(data.get("difficulty") or "medium"),
         }
+    except InterviewConfigError:
+        raise
     except InterviewAIError:
         bank = load_question_bank()
         topic_key = topic if topic in bank else next(iter(bank))
@@ -123,22 +163,47 @@ def generate_question(
         }
 
 
-def evaluate_answer(question: str, answer: str, role: str, level: str = "fresher") -> dict[str, Any]:
+def evaluate_answer(
+    question: str,
+    answer: str,
+    role: str,
+    level: str = "fresher",
+    context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Score one answer. `context` carries the original question and answer when this is a follow-up."""
     system = _read_prompt("evaluate_answer.txt").format(role=role, level=level)
-    user = f"Question:\n{question}\n\nCandidate answer:\n{answer}"
-    data = _complete(system, user, kind="scoring")
+
+    # The answer is untrusted text: cap it and make sure it can't close our <answer> tag.
+    safe_answer = answer.replace("</answer>", "").strip()[:MAX_ANSWER_CHARS]
+
+    parts = [f"Question:\n{question}"]
+    if context:
+        parts.append(
+            "This question is a follow-up. Earlier in the interview:\n"
+            f"Original question: {context.get('question', '')}\n"
+            f"Candidate's earlier answer: {str(context.get('answer', ''))[:1500]}\n"
+            f"Weakness noted: {context.get('improve', '')}"
+        )
+    parts.append(f"<answer>\n{safe_answer}\n</answer>")
+
+    data = _complete(system, "\n\n".join(parts), kind="scoring")
     for key in ("score", "correctness", "clarity", "depth"):
-        data[key] = max(0, min(10, int(data.get(key, 0))))
+        data[key] = _to_score(data.get(key))
     for key in ("strengths", "improve", "better_answer", "follow_up_question", "topic"):
         data[key] = str(data.get(key, "")).strip()
     return data
 
 
 def final_report(role: str, level: str, turns: list[dict[str, Any]]) -> dict[str, Any]:
-    scores = [int(t.get("score", 0)) for t in turns]
+    scores = [_to_score(t.get("score")) for t in turns]
     avg = round(sum(scores) / len(scores)) if scores else 0
     system = _read_prompt("final_report.txt").format(role=role, level=level)
     user = json.dumps({"turns": turns, "average_score": avg}, ensure_ascii=False)
     data = _complete(system, user, kind="scoring")
-    data["overall_score"] = max(0, min(10, int(data.get("overall_score", avg))))
+    # The score is arithmetic, so code owns it. Claude only writes the words.
+    data["overall_score"] = avg
+    for key in ("strengths", "weak_topics", "next_practice"):
+        value = data.get(key, [])
+        data[key] = value if isinstance(value, list) else [str(value)]
+    data["summary"] = str(data.get("summary", "")).strip()
     return data
