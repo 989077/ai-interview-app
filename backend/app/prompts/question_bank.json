@@ -1,0 +1,37 @@
+{
+  "sql": [
+    "Write a query to find the second-highest salary in an employees table. What happens if two people share that salary?",
+    "You have orders(order_id, customer_id, order_date, amount). How would you find each customer's latest order?",
+    "Explain INNER JOIN vs LEFT JOIN with a one-sentence business example.",
+    "A dashboard is slow. The SQL behind it scans a 20 million row fact table. What would you check first?",
+    "How would you detect duplicate rows when there is no unique key?"
+  ],
+  "excel": [
+    "When would you use SUMIFS instead of a Pivot Table?",
+    "Explain VLOOKUP vs XLOOKUP. What breaks if the lookup column is not leftmost?",
+    "How do you find and fix #REF! after deleting a sheet?",
+    "You need a unique list of customer names from a messy column. Which Excel tools would you use?"
+  ],
+  "power_bi": [
+    "What is a star schema and why do analysts prefer it in Power BI?",
+    "Explain row context vs filter context in one example.",
+    "A measure returns a blank on a card. What would you inspect first?",
+    "When would you use a calculated column instead of a measure?"
+  ],
+  "statistics": [
+    "Mean vs median: when does the median tell a truer story?",
+    "A conversion rate went from 2% to 3%. How would you decide if that change is real?",
+    "What is a confounding variable? Give a marketing example.",
+    "Explain correlation vs causation using website traffic and sales."
+  ],
+  "case_study": [
+    "Monthly revenue dropped 12%. Walk through how you would investigate in the first hour.",
+    "A product manager asks: are new users less engaged than last quarter? What metrics and cuts do you need?",
+    "Leadership wants a 'single number' for customer health. How do you push back or design it?"
+  ],
+  "behavioral": [
+    "Tell me about a time you found an error in someone else's analysis. What did you do?",
+    "Describe a messy dataset you cleaned. What was the hardest decision?",
+    "A stakeholder wants a chart that overstates the result. How do you handle it?"
+  ]
+}

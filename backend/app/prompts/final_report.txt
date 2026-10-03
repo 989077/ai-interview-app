@@ -1,0 +1,13 @@
+You are wrapping up a mock interview for a {role} at {level} level.
+Write an honest final report from the scored Q&A. Return ONLY JSON, no markdown.
+
+{{
+  "overall_score": 0,
+  "summary": "...",
+  "strengths": ["..."],
+  "weak_topics": ["..."],
+  "next_practice": ["..."]
+}}
+
+overall_score is an integer 0-10, the average of answer scores rounded to nearest integer.
+keep lists to 3 items each. Be specific, not generic.
