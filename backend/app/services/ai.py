@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 import os
 import re
+import socket
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -24,11 +27,96 @@ MAX_ANSWER_CHARS = 4000
 
 
 class InterviewAIError(RuntimeError):
-    """Something went wrong talking to Claude. The message is safe to show the user."""
+    """Something went wrong talking to the AI model. The message is safe to show the user."""
 
 
 class InterviewConfigError(InterviewAIError):
-    """Setup problem (missing or rejected API key). Retrying or using the fallback bank won't help."""
+    """Setup problem (bad API key, Ollama not running, model not pulled). Retrying or the fallback bank won't help."""
+
+
+def _provider() -> str:
+    """Which engine answers: "ollama" (free, local, default) or "anthropic" (Claude API)."""
+    return os.getenv("LLM_PROVIDER", "ollama").strip().lower()
+
+
+def _ollama_url() -> str:
+    return os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/")
+
+
+def _ollama_model() -> str:
+    return os.getenv("OLLAMA_MODEL", "llama3.1:8b").strip()
+
+
+def _call_ollama(system: str, user: str) -> str:
+    """Send one chat request to a local Ollama server and return the reply text."""
+    model = _ollama_model()
+    payload = json.dumps(
+        {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            "stream": False,
+            "format": "json",  # forces valid JSON output
+            "options": {"temperature": 0.3},
+        }
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        f"{_ollama_url()}/api/chat", data=payload, headers={"Content-Type": "application/json"}
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=300) as response:
+            body = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = ""
+        try:
+            detail = json.loads(exc.read().decode("utf-8")).get("error", "")
+        except Exception:  # noqa: BLE001
+            pass
+        if exc.code == 404:
+            raise InterviewConfigError(
+                f"Ollama does not have the model '{model}'. Run: ollama pull {model}"
+            ) from exc
+        raise InterviewAIError(f"Ollama error ({exc.code}): {detail or exc.reason}") from exc
+    except (socket.timeout, TimeoutError) as exc:
+        raise InterviewAIError(
+            "Ollama took too long to answer. The first request loads the model, so try again."
+        ) from exc
+    except urllib.error.URLError as exc:
+        if isinstance(exc.reason, (socket.timeout, TimeoutError)):
+            raise InterviewAIError(
+                "Ollama took too long to answer. The first request loads the model, so try again."
+            ) from exc
+        raise InterviewConfigError(
+            f"Cannot reach Ollama at {_ollama_url()}. Start the Ollama app, "
+            f"then run: ollama pull {model}"
+        ) from exc
+    return str(body.get("message", {}).get("content", ""))
+
+
+def _call_anthropic(system: str, user: str, kind: str) -> str:
+    """Send one request to the Claude API and return the reply text."""
+    client = _client()
+    try:
+        message = client.messages.create(
+            model=_model(kind),
+            max_tokens=1200,
+            system=system,
+            messages=[{"role": "user", "content": user}],
+        )
+    except anthropic.AuthenticationError as exc:
+        raise InterviewConfigError(
+            "Claude rejected your API key. Check ANTHROPIC_API_KEY in .env."
+        ) from exc
+    except anthropic.RateLimitError as exc:
+        raise InterviewAIError("Rate limit reached. Wait a minute and try again.") from exc
+    except anthropic.APIConnectionError as exc:
+        raise InterviewAIError("Could not reach the Claude API. Check your internet.") from exc
+    except anthropic.APIStatusError as exc:
+        # Includes "credit balance too low" and "model not found".
+        raise InterviewAIError(f"Claude API error ({exc.status_code}): {exc.message}") from exc
+    return "".join(block.text for block in message.content if getattr(block, "type", "") == "text")
 
 
 def _client() -> Anthropic:
@@ -83,34 +171,17 @@ def _to_score(value: Any, default: int = 0) -> int:
 
 
 def _complete(system: str, user: str, *, kind: str = "scoring") -> dict[str, Any]:
-    client = _client()
     last_error: Exception | None = None
     for _ in range(2):  # one retry, only for unreadable JSON
-        try:
-            message = client.messages.create(
-                model=_model(kind),
-                max_tokens=1200,
-                system=system,
-                messages=[{"role": "user", "content": user}],
-            )
-        except anthropic.AuthenticationError as exc:
-            raise InterviewConfigError(
-                "Claude rejected your API key. Check ANTHROPIC_API_KEY in .env."
-            ) from exc
-        except anthropic.RateLimitError as exc:
-            raise InterviewAIError("Rate limit reached. Wait a minute and try again.") from exc
-        except anthropic.APIConnectionError as exc:
-            raise InterviewAIError("Could not reach the Claude API. Check your internet.") from exc
-        except anthropic.APIStatusError as exc:
-            # Includes "credit balance too low" and "model not found".
-            raise InterviewAIError(f"Claude API error ({exc.status_code}): {exc.message}") from exc
-
-        text = "".join(block.text for block in message.content if getattr(block, "type", "") == "text")
+        if _provider() == "anthropic":
+            text = _call_anthropic(system, user, kind)
+        else:
+            text = _call_ollama(system, user)
         try:
             return _extract_json(text)
         except (json.JSONDecodeError, InterviewAIError) as exc:
             last_error = exc
-    raise InterviewAIError(f"Could not read Claude's JSON after a retry: {last_error}")
+    raise InterviewAIError(f"Could not read the model's JSON after a retry: {last_error}")
 
 
 def generate_question(
