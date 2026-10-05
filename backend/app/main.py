@@ -1,6 +1,6 @@
-"""FastAPI entry point. Run from the project root:
+﻿"""FastAPI entry point. Run from the project root:
 
-    uvicorn backend.app.main:app --reload
+    uvicorn app.main:app --reload
 
 then open http://localhost:8000/docs to try the endpoints.
 """
@@ -8,7 +8,7 @@ then open http://localhost:8000/docs to try the endpoints.
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.app.routes import sessions
+from app.routes import sessions
 
 app = FastAPI(title="AI Interview App", version="0.2.0")
 

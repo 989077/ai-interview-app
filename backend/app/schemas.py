@@ -1,4 +1,4 @@
-"""Request and response shapes for the API. Pydantic validates every field."""
+﻿"""Request and response shapes for the API. Pydantic validates every field."""
 
 from __future__ import annotations
 

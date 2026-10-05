@@ -1,4 +1,4 @@
-"""Interview flow: what to ask next, when to follow up, when to finish.
+﻿"""Interview flow: what to ask next, when to follow up, when to finish.
 
 Sessions live in a Python dict for now. Phase 4 replaces this with a database;
 the functions below are the only place that needs to change.
@@ -11,7 +11,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
-from backend.app.services import ai
+from app.services import ai
 
 FOLLOW_UP_BELOW = 7  # answers scoring under this get one follow-up question
 
