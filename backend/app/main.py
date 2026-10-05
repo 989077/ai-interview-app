@@ -2,13 +2,15 @@
 
     uvicorn backend.app.main:app --reload
 
+(or `uvicorn app.main:app --reload` from inside the backend folder)
+
 then open http://localhost:8000/docs to try the endpoints.
 """
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.app.routes import sessions
+from .routes import sessions
 
 app = FastAPI(title="AI Interview App", version="0.2.0")
 

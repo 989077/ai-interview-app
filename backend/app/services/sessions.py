@@ -11,8 +11,8 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
-from backend.app.db import store
-from backend.app.services import ai
+from ..db import store
+from . import ai
 
 FOLLOW_UP_BELOW = 7  # answers scoring under this get one follow-up question
 
