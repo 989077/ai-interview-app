@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
-from backend.app import schemas
-from backend.app.services import sessions
-from backend.app.services.ai import InterviewAIError, InterviewConfigError
+# Relative imports for Vercel deployment
+from .. import schemas
+from ..services import sessions
+from ..services.ai import InterviewAIError, InterviewConfigError
 
 router = APIRouter(prefix="/sessions", tags=["interview"])
 
