@@ -17,3 +17,4 @@ dist/
 # Interview history database (Phase 4)
 data/
 *.db
+*.tsbuildinfo

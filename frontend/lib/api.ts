@@ -55,6 +55,17 @@ export type Report = {
   turns: Turn[];
 };
 
+export type HistoryItem = {
+  id: string;
+  created_at: string;
+  role: string;
+  level: string;
+  n_questions: number;
+  answered: number;
+  status: "in_progress" | "finished";
+  overall_score: number | null;
+};
+
 export type StartOptions = {
   level: string;
   n_questions: number;
@@ -92,6 +103,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     }
     throw new ApiError(res.status, message);
   }
+  if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
 }
 
@@ -105,3 +117,7 @@ export const submitAnswer = (id: string, answer: string) =>
   });
 
 export const getReport = (id: string) => request<Report>(`/sessions/${id}/report`);
+
+export const getHistory = () => request<HistoryItem[]>("/sessions?limit=100");
+
+export const deleteSession = (id: string) => request<void>(`/sessions/${id}`, { method: "DELETE" });
