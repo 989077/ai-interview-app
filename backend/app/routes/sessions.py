@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from backend.app import schemas
 from backend.app.services import sessions
@@ -27,6 +27,20 @@ def start_session(body: schemas.SessionCreate) -> dict:
     except InterviewAIError as exc:
         raise _ai_error(exc) from exc
     return sessions.public_state(session)
+
+
+@router.get("", response_model=list[schemas.HistoryItem])
+def history(limit: int = Query(default=50, ge=1, le=200)) -> list[dict]:
+    """Past interviews, newest first."""
+    return sessions.list_history(limit)
+
+
+@router.delete("/{session_id}", status_code=204)
+def remove_session(session_id: str) -> None:
+    try:
+        sessions.delete_session(session_id)
+    except sessions.SessionNotFound as exc:
+        raise HTTPException(status_code=404, detail="Session not found") from exc
 
 
 @router.get("/{session_id}", response_model=schemas.SessionOut)

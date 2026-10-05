@@ -13,3 +13,7 @@ dist/
 .next/
 *.log
 .DS_Store
+
+# Interview history database (Phase 4)
+data/
+*.db

@@ -80,3 +80,14 @@ class ReportOut(BaseModel):
     weak_topics: list[str]
     next_practice: list[str]
     turns: list[TurnOut]
+
+
+class HistoryItem(BaseModel):
+    id: str
+    created_at: str
+    role: str
+    level: str
+    n_questions: int
+    answered: int
+    status: Literal["in_progress", "finished"]
+    overall_score: int | None

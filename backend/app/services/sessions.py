@@ -1,7 +1,7 @@
 """Interview flow: what to ask next, when to follow up, when to finish.
 
-Sessions live in a Python dict for now. Phase 4 replaces this with a database;
-the functions below are the only place that needs to change.
+Active sessions are cached in a dict (for the busy flag and lock) and every change
+is saved to SQLite (backend/app/db/store.py), so interviews survive a restart.
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
+from backend.app.db import store
 from backend.app.services import ai
 
 FOLLOW_UP_BELOW = 7  # answers scoring under this get one follow-up question
@@ -92,12 +93,47 @@ def public_state(s: Session) -> dict[str, Any]:
     }
 
 
+_SAVED_FIELDS = (
+    "id", "role", "level", "n_questions", "topic_pref",
+    "resume_text", "job_description", "turns", "current", "report",
+)
+
+
+def _persist(s: Session) -> None:
+    store.save_session(
+        session_id=s.id,
+        role=s.role,
+        level=s.level,
+        n_questions=s.n_questions,
+        answered=len(s.turns),
+        status="finished" if s.report else "in_progress",
+        overall_score=s.report["overall_score"] if s.report else None,
+        data={k: getattr(s, k) for k in _SAVED_FIELDS},
+    )
+
+
 def get_session(session_id: str) -> Session:
     with _STORE_LOCK:
         session = _SESSIONS.get(session_id)
+        if session is None:
+            saved = store.load_session(session_id)  # e.g. after a server restart
+            if saved is not None:
+                session = Session(**saved)
+                _SESSIONS[session_id] = session
     if session is None:
         raise SessionNotFound(session_id)
     return session
+
+
+def list_history(limit: int = 50) -> list[dict[str, Any]]:
+    return store.list_sessions(limit)
+
+
+def delete_session(session_id: str) -> None:
+    with _STORE_LOCK:
+        _SESSIONS.pop(session_id, None)
+    if not store.delete_session(session_id):
+        raise SessionNotFound(session_id)
 
 
 def create_session(
@@ -122,6 +158,7 @@ def create_session(
     )
     # Ask the model first. If it fails (Ollama not running), no half-made session is stored.
     session.current = _next_fresh_question(session)
+    _persist(session)
     with _STORE_LOCK:
         _SESSIONS[session.id] = session
     return session
@@ -187,6 +224,7 @@ def submit_answer(session_id: str, answer: str) -> tuple[Session, dict[str, Any]
         session.turns.append(turn)
         session.current = None if finished else next_question
         session.report = report
+        _persist(session)
         return session, evaluation
     finally:
         session.busy = False
