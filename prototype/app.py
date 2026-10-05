@@ -18,6 +18,7 @@ from backend.app.services.ai import (  # noqa: E402
 )
 
 TOPICS = list(load_question_bank().keys())
+FOLLOW_UP_BELOW = 7  # answers scoring under this get one follow-up question
 
 st.set_page_config(page_title="AI Interview Practice", layout="wide")
 st.title("AI Interview Practice")
@@ -97,11 +98,12 @@ if st.session_state.report:
 if st.session_state.current is None:
     with st.spinner("Preparing the next question..."):
         try:
-            next_topic = st.session_state.topic_pref
-            if next_topic is None and turns:
-                next_topic = TOPICS[len(turns) % len(TOPICS)]
-            elif next_topic is None:
-                next_topic = TOPICS[0]
+            # Rotate by number of main questions, so follow-ups don't skip topics.
+            main_count = sum(1 for t in turns if not t.get("is_follow_up"))
+            if main_count == 0 and st.session_state.topic_pref:
+                next_topic = st.session_state.topic_pref
+            else:
+                next_topic = TOPICS[main_count % len(TOPICS)]
             st.session_state.current = generate_question(
                 role=role,
                 level=level,
@@ -126,16 +128,24 @@ submit = st.button("Submit answer", type="primary", disabled=not answer.strip())
 if submit:
     with st.spinner("Scoring your answer..."):
         try:
-            evaluation = evaluate_answer(current["question"], answer.strip(), role, level)
+            evaluation = evaluate_answer(
+                current["question"],
+                answer.strip(),
+                role,
+                level,
+                context=current.get("parent"),
+            )
         except InterviewAIError as exc:
             st.error(str(exc))
             st.stop()
+    is_follow_up = current.get("parent") is not None
     turn = {
         "question": current["question"],
-        "topic": evaluation.get("topic") or current.get("topic"),
         "difficulty": current.get("difficulty"),
         "answer": answer.strip(),
         **evaluation,
+        "topic": evaluation.get("topic") or current.get("topic"),
+        "is_follow_up": is_follow_up,
     }
     turns.append(turn)
     st.session_state.turns = turns
@@ -154,12 +164,22 @@ if submit:
                 }
         st.session_state.current = None
         st.rerun()
+    # A weak answer earns ONE follow-up. After that (or after a good answer),
+    # move on to a fresh question on the next topic.
     follow = evaluation.get("follow_up_question")
-    st.session_state.current = {
-        "question": follow or current["question"],
-        "topic": turn["topic"],
-        "difficulty": current.get("difficulty", "medium"),
-    }
+    if not is_follow_up and turn["score"] < FOLLOW_UP_BELOW and follow:
+        st.session_state.current = {
+            "question": follow,
+            "topic": turn["topic"],
+            "difficulty": current.get("difficulty", "medium"),
+            "parent": {
+                "question": turn["question"],
+                "answer": turn["answer"],
+                "improve": turn.get("improve", ""),
+            },
+        }
+    else:
+        st.session_state.current = None
     st.rerun()
 
 if st.session_state.get("last_feedback") and turns:

@@ -192,10 +192,10 @@ def generate_question(
     resume_text: str = "",
     job_description: str = "",
 ) -> dict[str, Any]:
-    """Ask the model for the next interview question.
+    """Ask Claude for the next interview question.
 
-    Falls back to the local bank if the model is temporarily unavailable or returns junk.
-    Setup problems (bad key, Ollama not running) are raised, not hidden.
+    Falls back to the local bank if Claude is temporarily unavailable or returns junk.
+    Setup problems (missing or bad API key) are raised, not hidden.
     """
     history = history or []
     asked = [item.get("question", "") for item in history]
@@ -271,7 +271,7 @@ def final_report(role: str, level: str, turns: list[dict[str, Any]]) -> dict[str
     system = _read_prompt("final_report.txt").format(role=role, level=level)
     user = json.dumps({"turns": turns, "average_score": avg}, ensure_ascii=False)
     data = _complete(system, user, kind="scoring")
-    # The score is arithmetic, so code owns it. The model only writes the words.
+    # The score is arithmetic, so code owns it. Claude only writes the words.
     data["overall_score"] = avg
     for key in ("strengths", "weak_topics", "next_practice"):
         value = data.get(key, [])
